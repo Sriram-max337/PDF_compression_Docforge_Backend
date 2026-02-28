@@ -1,5 +1,6 @@
 import os
 import platform
+import shutil
 import subprocess
 import tempfile
 from enum import Enum
@@ -7,8 +8,11 @@ from enum import Enum
 from fastapi import FastAPI, File, Query, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
-app = FastAPI(title="Docforge — PDF Compression API")
+from convert import convert_to_pdf, ALLOWED_EXTENSIONS
+
+app = FastAPI(title="Docforge — PDF Toolkit API")
 
 # ---------------------------------------------------------------------------
 # CORS — allow any frontend origin during development
@@ -124,3 +128,57 @@ async def compress_pdf(
 
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# File → PDF conversion endpoint
+# ---------------------------------------------------------------------------
+@app.post("/convert-to-pdf")
+async def convert_file_to_pdf(
+    file: UploadFile = File(...),
+):
+    """Accept an office document upload, convert it to PDF via LibreOffice,
+    and return the PDF for download."""
+
+    # --- Validate extension ---------------------------------------------------
+    original_name = file.filename or "upload"
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported file type '{ext}'. "
+                f"Accepted types: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            ),
+        )
+
+    # --- Save upload to a temp directory --------------------------------------
+    tmp_dir = tempfile.mkdtemp()
+    input_path = os.path.join(tmp_dir, original_name)
+
+    try:
+        with open(input_path, "wb") as f:
+            f.write(await file.read())
+
+        pdf_path = convert_to_pdf(input_path, tmp_dir)
+
+        pdf_download_name = os.path.splitext(original_name)[0] + ".pdf"
+
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=pdf_download_name,
+            # Clean up the temp directory after the response is sent
+            background=BackgroundTask(shutil.rmtree, tmp_dir, ignore_errors=True),
+        )
+
+    except RuntimeError as exc:
+        # Clean up on error
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error during conversion: {exc}",
+        )
