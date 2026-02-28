@@ -152,9 +152,10 @@ async def convert_file_to_pdf(
             ),
         )
 
-    # --- Save upload to a temp directory --------------------------------------
+    # --- Save upload with a safe filename --------------------------------------
     tmp_dir = tempfile.mkdtemp()
-    input_path = os.path.join(tmp_dir, original_name)
+    safe_name = f"inputfile{ext}"
+    input_path = os.path.join(tmp_dir, safe_name)
 
     try:
         with open(input_path, "wb") as f:
