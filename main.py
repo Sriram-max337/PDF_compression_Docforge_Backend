@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from convert import convert_to_pdf, ALLOWED_EXTENSIONS
+from img_convert import image_to_pdf, ALLOWED_IMAGE_EXTENSIONS
 
 app = FastAPI(title="Docforge — PDF Toolkit API")
 
@@ -182,4 +183,55 @@ async def convert_file_to_pdf(
         raise HTTPException(
             status_code=500,
             detail=f"Unexpected error during conversion: {exc}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Image → PDF conversion endpoint
+# ---------------------------------------------------------------------------
+@app.post("/convert-image-to-pdf")
+async def convert_image_to_pdf(
+    file: UploadFile = File(...),
+):
+    """Accept a PNG/JPG image upload and convert it to a single-page PDF."""
+
+    # --- Validate extension ---------------------------------------------------
+    original_name = file.filename or "image"
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported image type '{ext}'. "
+                f"Accepted types: {', '.join(sorted(ALLOWED_IMAGE_EXTENSIONS))}"
+            ),
+        )
+
+    # --- Save upload to a temp directory --------------------------------------
+    tmp_dir = tempfile.mkdtemp()
+    input_path = os.path.join(tmp_dir, original_name)
+
+    try:
+        with open(input_path, "wb") as f:
+            f.write(await file.read())
+
+        pdf_path = image_to_pdf(input_path, tmp_dir)
+
+        pdf_download_name = os.path.splitext(original_name)[0] + ".pdf"
+
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=pdf_download_name,
+            background=BackgroundTask(shutil.rmtree, tmp_dir, ignore_errors=True),
+        )
+
+    except RuntimeError as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error during image conversion: {exc}",
         )
