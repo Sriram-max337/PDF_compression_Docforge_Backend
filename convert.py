@@ -1,7 +1,9 @@
 """
-Docforge — File-to-PDF conversion via LibreOffice headless.
+Docforge — File-to-PDF conversion.
 
-Supported input formats: doc, docx, ppt, pptx, xls, xlsx, txt.
+Supported input formats:
+  Office : doc, docx, ppt, pptx, xls, xlsx, txt  (via LibreOffice)
+  Images : png, jpg, jpeg                         (via Pillow)
 """
 
 import glob
@@ -10,15 +12,19 @@ import platform
 import shutil
 import subprocess
 
+from PIL import Image
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+IMAGE_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg"}
+
 ALLOWED_EXTENSIONS: set[str] = {
     ".doc", ".docx",
     ".ppt", ".pptx",
     ".xls", ".xlsx",
     ".txt",
-}
+} | IMAGE_EXTENSIONS
 
 # Locate LibreOffice binary based on platform
 if platform.system() == "Windows":
@@ -32,7 +38,21 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# Conversion helper
+# Image → PDF  (Pillow)
+# ---------------------------------------------------------------------------
+def _convert_image_to_pdf(src_path: str, out_dir: str) -> str:
+    """Convert a PNG / JPG image to a single-page PDF using Pillow."""
+    img = Image.open(src_path)
+    # Convert RGBA → RGB (PDF doesn't support transparency)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    pdf_path = os.path.join(out_dir, "inputfile.pdf")
+    img.save(pdf_path, "PDF", resolution=150)
+    return pdf_path
+
+
+# ---------------------------------------------------------------------------
+# Main conversion dispatcher
 # ---------------------------------------------------------------------------
 def convert_to_pdf(src_path: str, out_dir: str) -> str:
     """
@@ -51,8 +71,13 @@ def convert_to_pdf(src_path: str, out_dir: str) -> str:
     RuntimeError
         If LibreOffice exits with a non-zero code or no PDF is produced.
     """
-    # --- Rename to a safe filename to avoid LibreOffice quirks ----------------
     ext = os.path.splitext(os.path.basename(src_path))[1].lower()
+
+    # --- Image files → Pillow (fast, no LibreOffice needed) -------------------
+    if ext in IMAGE_EXTENSIONS:
+        return _convert_image_to_pdf(src_path, out_dir)
+
+    # --- Office files → LibreOffice headless ----------------------------------
     safe_name = f"inputfile{ext}"
     safe_path = os.path.join(out_dir, safe_name)
 
