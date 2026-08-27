@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from enum import Enum
 
-from fastapi import FastAPI, File, Query, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
@@ -77,11 +77,11 @@ def _compress_pdf(src: str, dst: str, level: CompressionLevel) -> None:
 @app.post("/compress-pdf")
 async def compress_pdf(
     file: UploadFile = File(...),
-    compression_level: CompressionLevel = Query(
+    compression_level: CompressionLevel = Form(
         CompressionLevel.medium,
         description="low (best quality), medium (balanced), high (smallest size)",
     ),
-    target_size_mb: float | None = Query(
+    target_size_mb: float | None = Form(
         None,
         description="Optional target file size in MB. If set, the API will try "
         "increasingly aggressive compression to meet it.",
@@ -125,9 +125,14 @@ async def compress_pdf(
                 "X-Original-Size": str(original),
                 "X-Compressed-Size": str(compressed),
             },
+            background=BackgroundTask(shutil.rmtree, tmp_dir, ignore_errors=True),
         )
 
     except RuntimeError as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -228,10 +233,4 @@ async def convert_image_to_pdf(
 
     except RuntimeError as exc:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=str(exc))
-    except Exception as exc:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected error during image conversion: {exc}",
-        )
+        raise HTTPException(status_code=500, det
